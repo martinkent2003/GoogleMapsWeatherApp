@@ -73,9 +73,11 @@ class MapsActivity : AppCompatActivity(),
             .findFragmentById(R.id.map) as SupportMapFragment
         mapFragment.getMapAsync(this)
 
+        val counties = findViewById<RadioButton>(R.id.counties)
         val states = findViewById<RadioButton>(R.id.states)
         val countries = findViewById<RadioButton>(R.id.countries)
 
+        counties.setOnClickListener(this)
         states.setOnClickListener(this)
         countries.setOnClickListener(this)
     }
@@ -107,6 +109,7 @@ class MapsActivity : AppCompatActivity(),
 
         loadGeoJsonFromResource(R.raw.us_states)
         loadGeoJsonFromResource(R.raw.countries)
+        loadGeoJsonFromResource(R.raw.us_counties)
 
         // Add a marker in Sydney and move the camera
 
@@ -275,13 +278,21 @@ class MapsActivity : AppCompatActivity(),
 
     override fun onClick(v: View?) {
         if(v is RadioButton){
-            if(v.id==R.id.states){
+            if(v.id == R.id.counties){
+                Toast.makeText(this,"displaying only counties", Toast.LENGTH_SHORT).show()
+                layers[R.raw.countries]?.removeLayerFromMap()
+                layers[R.raw.us_states]?.removeLayerFromMap()
+                layers[R.raw.us_counties]?.addLayerToMap()
+            }
+            else if(v.id==R.id.states){
                 Toast.makeText(this,"displaying only states", Toast.LENGTH_SHORT).show()
                 layers[R.raw.countries]?.removeLayerFromMap()
+                layers[R.raw.us_counties]?.removeLayerFromMap()
                 layers[R.raw.us_states]?.addLayerToMap()
             }else if (v.id == R.id.countries){
                 Toast.makeText(this,"displaying only countries", Toast.LENGTH_SHORT).show()
                 layers[R.raw.us_states]?.removeLayerFromMap()
+                layers[R.raw.us_counties]?.removeLayerFromMap()
                 layers[R.raw.countries]?.addLayerToMap()
             }
         }
