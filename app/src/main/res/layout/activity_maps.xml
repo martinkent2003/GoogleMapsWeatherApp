@@ -29,7 +29,7 @@
                 android:layout_width="0dp"
                 android:layout_height="wrap_content"
                 android:layout_weight="0.25"
-                android:text="Counties" />
+                android:text="Counties"/>
 
             <RadioButton
                 android:id="@+id/states"
@@ -44,5 +44,12 @@
                 android:layout_height="wrap_content"
                 android:layout_weight="0.25"
                 android:text="Countries" />
+
+             <RadioButton
+                android:id="@+id/tornadoes"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="0.3"
+                android:text="Tornadoes"/>
     </RadioGroup>
 </FrameLayout>
