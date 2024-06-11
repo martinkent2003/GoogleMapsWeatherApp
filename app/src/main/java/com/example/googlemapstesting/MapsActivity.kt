@@ -1,12 +1,15 @@
 package com.example.googlemapstesting
 
 import android.Manifest
+import android.content.Context
+import android.content.SharedPreferences
 import android.content.pm.PackageManager
 import android.graphics.Color
 import android.location.Location
 import android.os.Bundle
 import android.util.Log
 import android.view.View
+import android.widget.CheckBox
 import android.widget.RadioButton
 import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
@@ -19,6 +22,8 @@ import com.google.android.gms.maps.OnMapReadyCallback
 import com.google.android.gms.maps.SupportMapFragment
 import com.google.android.gms.maps.model.*
 import com.example.googlemapstesting.databinding.ActivityMapsBinding
+import com.google.android.gms.maps.CameraUpdate
+import com.google.android.gms.maps.GoogleMap.OnCameraIdleListener
 import com.google.android.gms.maps.GoogleMap.OnMapClickListener
 import com.google.android.gms.maps.GoogleMap.OnMarkerClickListener
 import com.google.android.gms.maps.GoogleMap.OnMyLocationButtonClickListener
@@ -26,26 +31,43 @@ import com.google.android.gms.maps.GoogleMap.OnMyLocationClickListener
 import com.google.maps.android.clustering.ClusterItem
 import com.google.maps.android.clustering.ClusterManager
 import com.google.maps.android.data.geojson.GeoJsonLayer
+import kotlinx.coroutines.CoroutineExceptionHandler
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.MainScope
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 
 class MapsActivity : AppCompatActivity(),
     OnMarkerClickListener, OnMapReadyCallback, OnMyLocationButtonClickListener,
-    OnMyLocationClickListener, OnRequestPermissionsResultCallback, OnMapClickListener,
-    View.OnClickListener {
+    OnMyLocationClickListener, OnRequestPermissionsResultCallback, OnMapClickListener, OnCameraIdleListener{
 
     private val LOCATION_PERMISSION_REQUEST_CODE = 1
 
     private var layers : HashMap<Int, GeoJsonLayer> = HashMap<Int, GeoJsonLayer>()
-    private val PERTH = LatLng(-31.952854, 115.857342)
-    private val SYDNEY = LatLng(-33.87365, 151.20689)
-    private val BRISBANE = LatLng(-27.47093, 153.0235)
-    private var markerPerth: Marker? = null
-    private var markerSydney: Marker? = null
-    private var markerBrisbane: Marker? = null
     private lateinit var mMap: GoogleMap
     private lateinit var binding: ActivityMapsBinding
     private lateinit var clusterManager: ClusterManager<MyItem>
     private val tornadoItems = mutableListOf<MyItem>()  // Keep track of all tornado items
-    private var isClusterVisible = true
+    private lateinit var counties : CheckBox
+    private lateinit var states : CheckBox
+    private lateinit var countries : CheckBox
+    private lateinit var tornadoes : CheckBox
+    private var tornadoLoadJob: Job? = null
+    var tornadoManager : TornadoManager? = null
+    private lateinit var sharedPref : SharedPreferences
+
+    companion object {
+        private const val PREF_COUNTIES_CHECKED = "pref_counties_checked"
+        private const val PREF_STATES_CHECKED = "pref_states_checked"
+        private const val PREF_COUNTRIES_CHECKED = "pref_countries_checked"
+        private const val PREF_TORNADOES_CHECKED = "pref_tornadoes_checked"
+    }
+
+    private val coroutineExceptionHandler = CoroutineExceptionHandler{ _, exception ->
+        Log.e("CoroutineException", "Error occurred: ${exception.message}")
+    }
 
     inner class MyItem(
         lat: Double,
@@ -56,19 +78,15 @@ class MapsActivity : AppCompatActivity(),
         private val position: LatLng = LatLng(lat, lng)
         private val title: String = title
         private val snippet: String = snippet
-
         override fun getPosition(): LatLng {
             return position
         }
-
         override fun getTitle(): String? {
             return title
         }
-
         override fun getSnippet(): String? {
             return snippet
         }
-
         override fun getZIndex(): Float? {
             return 0f
         }
@@ -79,22 +97,33 @@ class MapsActivity : AppCompatActivity(),
         binding = ActivityMapsBinding.inflate(layoutInflater)
         setContentView(binding.root)
 
+        sharedPref = getSharedPreferences(getString(R.string.preference_file_key), Context.MODE_PRIVATE)
+
         val mapFragment = supportFragmentManager
             .findFragmentById(R.id.map) as SupportMapFragment
         mapFragment.getMapAsync(this)
 
-        val counties = findViewById<RadioButton>(R.id.counties)
-        val states = findViewById<RadioButton>(R.id.states)
-        val countries = findViewById<RadioButton>(R.id.countries)
+    }
 
-        counties.setOnClickListener(this)
-        states.setOnClickListener(this)
-        countries.setOnClickListener(this)
+    private fun initializeSharedPreferences() {
+        val countiesChecked = sharedPref.getBoolean(PREF_COUNTIES_CHECKED, false)
+        val statesChecked = sharedPref.getBoolean(PREF_STATES_CHECKED, false)
+        val countriesChecked = sharedPref.getBoolean(PREF_COUNTRIES_CHECKED, false)
+        val tornadoesChecked = sharedPref.getBoolean(PREF_TORNADOES_CHECKED, false)
+
+        counties.isChecked = countiesChecked
+        states.isChecked = statesChecked
+        countries.isChecked = countriesChecked
+        tornadoes.isChecked = tornadoesChecked
+
+        initializeLayersAndMarkers()
     }
 
     override fun onMapReady(googleMap: GoogleMap) {
         mMap = googleMap
         mMap.mapType = GoogleMap.MAP_TYPE_NORMAL
+        //setup marker clusterer
+        setUpClusterer()
 
         if (ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION)
             != PackageManager.PERMISSION_GRANTED) {
@@ -105,55 +134,27 @@ class MapsActivity : AppCompatActivity(),
             enableMyLocation()
         }
 
-        val australia = LatLngBounds(
-            LatLng(-44.0,113.0),
-            LatLng(-10.0, 154.0)
-        )
-
-        markerPerth = mMap.addMarker(
-            MarkerOptions().position(PERTH).title("Perth")
-        )
-        markerSydney = mMap.addMarker(
-            MarkerOptions().position(SYDNEY).title("Sydney").icon(BitmapDescriptorFactory.defaultMarker(BitmapDescriptorFactory.HUE_AZURE)).draggable(true)
-        )
-        markerBrisbane = mMap.addMarker(
-            MarkerOptions().position(BRISBANE).icon(BitmapDescriptorFactory.defaultMarker(BitmapDescriptorFactory.HUE_YELLOW)).title("Brisbane")
-        )
-
-        val pO = PolylineOptions().add(BRISBANE).add(SYDNEY).add(PERTH).color(Color.RED)
-        val p1 = PolygonOptions()
-            .add(
-                LatLng(-44.0,113.0),
-                LatLng(-44.0,154.0),
-                LatLng(-10.0, 154.0),
-                LatLng(-10.0,113.0)
-            )
-            .strokeColor(Color.BLUE)
-            .fillColor(Color.YELLOW)
-            .addHole(listOf(
-                LatLng(-43.0,114.0),
-                LatLng(-43.0,153.0),
-                LatLng(-11.0, 153.0),
-                LatLng(-11.0,114.0)
-            ))
-
-        val c1 = CircleOptions().center(LatLng(-27.0,134.0)).radius(100000.0).strokeColor(Color.CYAN).strokeWidth(19f)
-        val pKoala = GroundOverlayOptions().image(BitmapDescriptorFactory.fromResource(R.drawable.koala)).position(PERTH, 900f, 900f)
-
-        mMap.addGroundOverlay(pKoala)
-        mMap.setPadding(0, 0, 0, 150)
-        mMap.moveCamera(CameraUpdateFactory.newLatLngBounds(australia, 0))
         mMap.setOnMyLocationButtonClickListener(this)
         mMap.setOnMyLocationClickListener(this)
         mMap.setOnMapClickListener(this)
+        mMap.setOnCameraIdleListener(this)
 
-        setUpClusterer()
-        Log.d("MAP", "MAP CREATED")
-        val tornadoManager = TornadoManager(1)
-        addTornadoes(tornadoManager)
+        //get view checkboxes
+        counties = findViewById<CheckBox>(R.id.counties)
+        states = findViewById<CheckBox>(R.id.states)
+        countries = findViewById<CheckBox>(R.id.countries)
+        tornadoes = findViewById<CheckBox>(R.id.tornadoes)
+
+        startTornadoJob()
+        //load geoJsonLayers
         loadGeoJsonFromResource(R.raw.us_states)
         loadGeoJsonFromResource(R.raw.countries)
         loadGeoJsonFromResource(R.raw.us_counties)
+        //add menu listeners and checkbox listeners, and then initialize the previous state values
+        removeMenuListeners()
+        initializeSharedPreferences()
+        mMap.moveCamera(CameraUpdateFactory.newLatLng(LatLng(26.0, -80.1)))
+
     }
 
     private fun loadGeoJsonFromResource(resourceId: Int) {
@@ -171,7 +172,6 @@ class MapsActivity : AppCompatActivity(),
             e.printStackTrace()
         }
     }
-
 
     private fun enableMyLocation() {
         if (ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED) {
@@ -194,44 +194,8 @@ class MapsActivity : AppCompatActivity(),
 
     override fun onMapClick(p0: LatLng) {
         Log.d("MAP", "CLICKED")
+        Log.d("TESTING", "CLICKED")
         Toast.makeText(this, "lat: ${p0.latitude}\nlng: ${p0.longitude}", Toast.LENGTH_LONG).show()
-    }
-
-    override fun onClick(v: View?) {
-        if (v is RadioButton) {
-            when (v.id) {
-                R.id.counties -> {
-                    Toast.makeText(this, "displaying only counties", Toast.LENGTH_SHORT).show()
-                    layers[R.raw.countries]?.removeLayerFromMap()
-                    layers[R.raw.us_states]?.removeLayerFromMap()
-                    layers[R.raw.us_counties]?.addLayerToMap()
-                    toggleClusterVisibility(false)
-                }
-                R.id.states -> {
-                    Toast.makeText(this, "displaying only states", Toast.LENGTH_SHORT).show()
-                    layers[R.raw.countries]?.removeLayerFromMap()
-                    layers[R.raw.us_counties]?.removeLayerFromMap()
-                    layers[R.raw.us_states]?.addLayerToMap()
-                    toggleClusterVisibility(false)
-                }
-                R.id.countries -> {
-                    Toast.makeText(this, "displaying only countries", Toast.LENGTH_SHORT).show()
-                    layers[R.raw.us_states]?.removeLayerFromMap()
-                    layers[R.raw.us_counties]?.removeLayerFromMap()
-                    layers[R.raw.countries]?.addLayerToMap()
-
-                    toggleClusterVisibility(false)
-
-                }
-                R.id.tornadoes -> {
-                    Toast.makeText(this, "displaying only tornadoes", Toast.LENGTH_SHORT).show()
-                    layers[R.raw.us_states]?.removeLayerFromMap()
-                    layers[R.raw.us_counties]?.removeLayerFromMap()
-                    layers[R.raw.countries]?.removeLayerFromMap()
-                    toggleClusterVisibility(true)
-                }
-            }
-        }
     }
 
     private fun setUpClusterer() {
@@ -255,28 +219,28 @@ class MapsActivity : AppCompatActivity(),
                     val snippet = comments ?: "No additional information available."
                     val tornadoItem = MyItem(lat, long, title, snippet)
                     tornadoItems.add(tornadoItem)
-                    clusterManager.addItem(tornadoItem)
                 }
             }
-            clusterManager.cluster()
         }
     }
 
-    private fun toggleClusterVisibility(visible: Boolean) {
-        if(isClusterVisible == visible) return
-        if (isClusterVisible && !visible) {
-            clusterManager.clearItems()
-            clusterManager.cluster()
-            isClusterVisible = false
-        } else if(!isClusterVisible && visible) {
-            for (item in tornadoItems) {
-                clusterManager.addItem(item)
+    fun startTornadoJob(){
+        stopTornadoJob()
+        tornadoManager = TornadoManager(System.currentTimeMillis().toInt())
+        // reload tornado layers every half hour
+        tornadoLoadJob = MainScope().launch{
+            while(true){
+                CoroutineScope(Dispatchers.IO + coroutineExceptionHandler).launch {
+                    Log.d("Tornado Coroutine", "loading tornadoes")
+                    addTornadoes(tornadoManager!!)
+                }
+                delay(1000 * 60 * 30)
             }
-            clusterManager.cluster()
-            isClusterVisible = true
-        }else{
-            Log.d("TOGGLECLUSTER", "YOUR LOGIC IS WRONG")
         }
+    }
+    fun stopTornadoJob(){
+        tornadoLoadJob?.cancel()
+        clusterManager.clearItems()
     }
 
     override fun onMarkerClick(marker: Marker): Boolean {
@@ -301,5 +265,100 @@ class MapsActivity : AppCompatActivity(),
     override fun onMyLocationButtonClick(): Boolean {
         Toast.makeText(this, "MyLocation button clicked", Toast.LENGTH_SHORT).show()
         return false
+    }
+
+    private fun initializeLayersAndMarkers() {
+        if (tornadoes.isChecked) {
+            Log.d("Cluster", "SHOW TORNADOES")
+            for (item in tornadoItems) {
+                clusterManager.addItem(item)
+            }
+            clusterManager.cluster()
+        }
+
+        if (countries.isChecked) {
+            layers[R.raw.countries]?.addLayerToMap()
+        } else {
+            layers[R.raw.countries]?.removeLayerFromMap()
+        }
+
+        if (states.isChecked) {
+            layers[R.raw.us_states]?.addLayerToMap()
+        } else {
+            layers[R.raw.us_states]?.removeLayerFromMap()
+        }
+
+        if (counties.isChecked) {
+            layers[R.raw.us_counties]?.addLayerToMap()
+        } else {
+            layers[R.raw.us_counties]?.removeLayerFromMap()
+        }
+    }
+
+    //remove menu listeners
+    private fun removeMenuListeners(){
+        // next two listeners are for the naming container
+        findViewById<View>(R.id.removal_button).setOnClickListener{
+            findViewById<View>(R.id.greyed_background_remove).visibility= View.VISIBLE
+        }
+        findViewById<View>(R.id.greyed_background_remove).setOnClickListener{
+            it.visibility = View.GONE
+        }
+        findViewById<View>(R.id.remove_container).setOnClickListener{
+                //this is purely so that clicking on it doesn't close the window
+        }
+
+        tornadoes.setOnCheckedChangeListener{_, isChecked ->
+            if (!isChecked) {
+                clusterManager.clearItems()
+                clusterManager.cluster()
+                Log.d("Cluster", "DELETE TORNADOES")
+            } else {
+                Log.d("Cluster", "SHOW TORNADOES")
+                for (item in tornadoItems) {
+                    clusterManager.addItem(item)
+                }
+                clusterManager.cluster()
+            }
+        }
+
+        countries.setOnCheckedChangeListener{_, isChecked ->
+            if (!isChecked)
+                layers[R.raw.countries]?.removeLayerFromMap()
+            else
+                layers[R.raw.countries]?.addLayerToMap()
+        }
+        states.setOnCheckedChangeListener{_, isChecked ->
+            if (!isChecked)
+                layers[R.raw.us_states]?.removeLayerFromMap()
+            else
+                layers[R.raw.us_states]?.addLayerToMap()
+        }
+        counties.setOnCheckedChangeListener{_, isChecked ->
+            if (!isChecked)
+                layers[R.raw.us_counties]?.removeLayerFromMap()
+            else
+                layers[R.raw.us_counties]?.addLayerToMap()
+        }
+    }
+
+    override fun onDestroy(){
+        super.onDestroy()
+        val editor = sharedPref.edit()
+        editor.putBoolean(PREF_COUNTIES_CHECKED, counties.isChecked)
+        editor.putBoolean(PREF_STATES_CHECKED, states.isChecked)
+        editor.putBoolean(PREF_COUNTRIES_CHECKED, countries.isChecked)
+        editor.putBoolean(PREF_TORNADOES_CHECKED, tornadoes.isChecked)
+        editor.apply()
+    }
+
+    override fun onCameraIdle() {
+        var mapBounds = mMap.projection.visibleRegion.latLngBounds
+        var sw = mapBounds?.southwest
+        var ne = mapBounds?.northeast
+
+        if (sw != null && ne != null){
+            Log.d("BOUNDS", "SW : $sw, NE : $ne")
+        }
     }
 }
