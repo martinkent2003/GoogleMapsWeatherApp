@@ -1,16 +1,15 @@
 package com.example.googlemapstesting
 
 import android.Manifest
+import android.annotation.SuppressLint
 import android.content.Context
 import android.content.SharedPreferences
 import android.content.pm.PackageManager
-import android.graphics.Color
 import android.location.Location
 import android.os.Bundle
 import android.util.Log
 import android.view.View
 import android.widget.CheckBox
-import android.widget.RadioButton
 import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.app.ActivityCompat
@@ -22,7 +21,6 @@ import com.google.android.gms.maps.OnMapReadyCallback
 import com.google.android.gms.maps.SupportMapFragment
 import com.google.android.gms.maps.model.*
 import com.example.googlemapstesting.databinding.ActivityMapsBinding
-import com.google.android.gms.maps.CameraUpdate
 import com.google.android.gms.maps.GoogleMap.OnCameraIdleListener
 import com.google.android.gms.maps.GoogleMap.OnMapClickListener
 import com.google.android.gms.maps.GoogleMap.OnMarkerClickListener
@@ -45,7 +43,7 @@ class MapsActivity : AppCompatActivity(),
 
     private val LOCATION_PERMISSION_REQUEST_CODE = 1
 
-    private var layers : HashMap<Int, GeoJsonLayer> = HashMap<Int, GeoJsonLayer>()
+    private var layers : HashMap<Int, GeoJsonLayer> = HashMap()
     private lateinit var mMap: GoogleMap
     private lateinit var binding: ActivityMapsBinding
     private lateinit var clusterManager: ClusterManager<MyItem>
@@ -55,7 +53,7 @@ class MapsActivity : AppCompatActivity(),
     private lateinit var countries : CheckBox
     private lateinit var tornadoes : CheckBox
     private var tornadoLoadJob: Job? = null
-    var tornadoManager : TornadoManager? = null
+    private var tornadoManager : TornadoManager? = null
     private lateinit var sharedPref : SharedPreferences
 
     companion object {
@@ -72,22 +70,20 @@ class MapsActivity : AppCompatActivity(),
     inner class MyItem(
         lat: Double,
         lng: Double,
-        title: String,
-        snippet: String
+        private val title: String,
+        private val snippet: String
     ) : ClusterItem {
         private val position: LatLng = LatLng(lat, lng)
-        private val title: String = title
-        private val snippet: String = snippet
         override fun getPosition(): LatLng {
             return position
         }
-        override fun getTitle(): String? {
+        override fun getTitle(): String {
             return title
         }
-        override fun getSnippet(): String? {
+        override fun getSnippet(): String {
             return snippet
         }
-        override fun getZIndex(): Float? {
+        override fun getZIndex(): Float {
             return 0f
         }
     }
@@ -145,7 +141,6 @@ class MapsActivity : AppCompatActivity(),
         countries = findViewById<CheckBox>(R.id.countries)
         tornadoes = findViewById<CheckBox>(R.id.tornadoes)
 
-        startTornadoJob()
         //load geoJsonLayers
         loadGeoJsonFromResource(R.raw.us_states)
         loadGeoJsonFromResource(R.raw.countries)
@@ -198,6 +193,7 @@ class MapsActivity : AppCompatActivity(),
         Toast.makeText(this, "lat: ${p0.latitude}\nlng: ${p0.longitude}", Toast.LENGTH_LONG).show()
     }
 
+    @SuppressLint("PotentialBehaviorOverride")
     private fun setUpClusterer() {
         clusterManager = ClusterManager(this, mMap)
         mMap.setOnCameraIdleListener(clusterManager)
@@ -206,26 +202,29 @@ class MapsActivity : AppCompatActivity(),
 
     private fun addTornadoes(tornadoManager: TornadoManager) {
         tornadoManager.makeHTTPRequest { tornadoResponse ->
-            for (feature in tornadoResponse.features) {
-                val lat = feature.attributes.lat
-                val long = feature.attributes.long
-                val location = feature.attributes.location
-                val county = feature.attributes.county
-                val state = feature.attributes.state
-                val comments = feature.attributes.comments
+            runOnUiThread{
+                for (feature in tornadoResponse.features) {
+                    val lat = feature.attributes.lat
+                    val long = feature.attributes.long
+                    val location = feature.attributes.location
+                    val county = feature.attributes.county
+                    val state = feature.attributes.state
+                    val comments = feature.attributes.comments
 
-                if (lat != null && long != null) {
-                    val title = "$location, $county, $state"
-                    val snippet = comments ?: "No additional information available."
-                    val tornadoItem = MyItem(lat, long, title, snippet)
-                    tornadoItems.add(tornadoItem)
+                    if (lat != null && long != null) {
+                        val title = "$location, $county, $state"
+                        val snippet = comments ?: "No additional information available."
+                        val tornadoItem = MyItem(lat, long, title, snippet)
+                        tornadoItems.add(tornadoItem)
+                        clusterManager.addItem(tornadoItem)
+                    }
                 }
+                clusterManager.cluster()
             }
         }
     }
 
     fun startTornadoJob(){
-        stopTornadoJob()
         tornadoManager = TornadoManager(System.currentTimeMillis().toInt())
         // reload tornado layers every half hour
         tornadoLoadJob = MainScope().launch{
@@ -238,9 +237,11 @@ class MapsActivity : AppCompatActivity(),
             }
         }
     }
+
     fun stopTornadoJob(){
         tornadoLoadJob?.cancel()
         clusterManager.clearItems()
+        clusterManager.cluster()
     }
 
     override fun onMarkerClick(marker: Marker): Boolean {
@@ -270,10 +271,7 @@ class MapsActivity : AppCompatActivity(),
     private fun initializeLayersAndMarkers() {
         if (tornadoes.isChecked) {
             Log.d("Cluster", "SHOW TORNADOES")
-            for (item in tornadoItems) {
-                clusterManager.addItem(item)
-            }
-            clusterManager.cluster()
+            startTornadoJob()
         }
 
         if (countries.isChecked) {
@@ -297,6 +295,7 @@ class MapsActivity : AppCompatActivity(),
 
     //remove menu listeners
     private fun removeMenuListeners(){
+        val editor = sharedPref.edit()
         // next two listeners are for the naming container
         findViewById<View>(R.id.removal_button).setOnClickListener{
             findViewById<View>(R.id.greyed_background_remove).visibility= View.VISIBLE
@@ -309,32 +308,38 @@ class MapsActivity : AppCompatActivity(),
         }
 
         tornadoes.setOnCheckedChangeListener{_, isChecked ->
+            editor.putBoolean(PREF_TORNADOES_CHECKED, tornadoes.isChecked)
+            editor.apply()
             if (!isChecked) {
-                clusterManager.clearItems()
-                clusterManager.cluster()
                 Log.d("Cluster", "DELETE TORNADOES")
+                stopTornadoJob()
             } else {
                 Log.d("Cluster", "SHOW TORNADOES")
-                for (item in tornadoItems) {
-                    clusterManager.addItem(item)
-                }
-                clusterManager.cluster()
+                startTornadoJob()
             }
         }
 
         countries.setOnCheckedChangeListener{_, isChecked ->
+            editor.putBoolean(PREF_COUNTRIES_CHECKED, countries.isChecked)
+            editor.apply()
             if (!isChecked)
                 layers[R.raw.countries]?.removeLayerFromMap()
             else
                 layers[R.raw.countries]?.addLayerToMap()
         }
+
         states.setOnCheckedChangeListener{_, isChecked ->
+            editor.putBoolean(PREF_STATES_CHECKED, states.isChecked)
+            editor.apply()
             if (!isChecked)
                 layers[R.raw.us_states]?.removeLayerFromMap()
             else
                 layers[R.raw.us_states]?.addLayerToMap()
         }
+
         counties.setOnCheckedChangeListener{_, isChecked ->
+            editor.putBoolean(PREF_COUNTIES_CHECKED, counties.isChecked)
+            editor.apply()
             if (!isChecked)
                 layers[R.raw.us_counties]?.removeLayerFromMap()
             else
@@ -342,23 +347,12 @@ class MapsActivity : AppCompatActivity(),
         }
     }
 
-    override fun onDestroy(){
-        super.onDestroy()
-        val editor = sharedPref.edit()
-        editor.putBoolean(PREF_COUNTIES_CHECKED, counties.isChecked)
-        editor.putBoolean(PREF_STATES_CHECKED, states.isChecked)
-        editor.putBoolean(PREF_COUNTRIES_CHECKED, countries.isChecked)
-        editor.putBoolean(PREF_TORNADOES_CHECKED, tornadoes.isChecked)
-        editor.apply()
-    }
 
     override fun onCameraIdle() {
-        var mapBounds = mMap.projection.visibleRegion.latLngBounds
-        var sw = mapBounds?.southwest
-        var ne = mapBounds?.northeast
+        val mapBounds = mMap.projection.visibleRegion.latLngBounds
+        val sw = mapBounds.southwest
+        val ne = mapBounds.northeast
 
-        if (sw != null && ne != null){
-            Log.d("BOUNDS", "SW : $sw, NE : $ne")
-        }
+        Log.d("BOUNDS", "SW : $sw, NE : $ne")
     }
 }
