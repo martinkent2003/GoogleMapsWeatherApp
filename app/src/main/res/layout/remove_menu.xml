@@ -16,6 +16,17 @@
         android:orientation="vertical"
         android:layout_gravity="center"
         android:layout_margin="25dp">
+
+        <CheckBox
+            android:id="@+id/weatheralert"
+            android:layout_width="match_parent"
+            android:layout_height="50dp"
+            android:layout_marginStart="10dp"
+            android:checked="false"
+            android:text="Weather Alerts"
+            android:textColor="@color/black"
+            android:textSize="20sp" />
+
         <CheckBox
             android:id="@+id/tornadoes"
             android:layout_width="match_parent"
@@ -25,6 +36,7 @@
             android:text="Tornado"
             android:textColor="@color/black"
             android:textSize="20sp" />
+
         <CheckBox
             android:id="@+id/countries"
             android:layout_width="match_parent"
@@ -34,6 +46,7 @@
             android:text="Country"
             android:textColor="@color/black"
             android:textSize="20sp" />
+
         <CheckBox
             android:id="@+id/states"
             android:layout_width="match_parent"
@@ -43,6 +56,7 @@
             android:text="State"
             android:textColor="@color/black"
             android:textSize="20sp" />
+
         <CheckBox
             android:id="@+id/counties"
             android:layout_width="match_parent"

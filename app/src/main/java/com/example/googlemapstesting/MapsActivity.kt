@@ -1,5 +1,6 @@
 package com.example.googlemapstesting
 
+import WeatherEventsManager
 import android.Manifest
 import android.annotation.SuppressLint
 import android.content.Context
@@ -28,6 +29,7 @@ import com.google.android.gms.maps.GoogleMap.OnMyLocationButtonClickListener
 import com.google.android.gms.maps.GoogleMap.OnMyLocationClickListener
 import com.google.maps.android.clustering.ClusterItem
 import com.google.maps.android.clustering.ClusterManager
+import com.google.maps.android.collections.PolygonManager
 import com.google.maps.android.data.geojson.GeoJsonLayer
 import kotlinx.coroutines.CoroutineExceptionHandler
 import kotlinx.coroutines.CoroutineScope
@@ -52,15 +54,19 @@ class MapsActivity : AppCompatActivity(),
     private lateinit var states : CheckBox
     private lateinit var countries : CheckBox
     private lateinit var tornadoes : CheckBox
+    private lateinit var weatherAlerts : CheckBox
     private var tornadoLoadJob: Job? = null
-    private var tornadoManager : TornadoManager? = null
+    private lateinit var tornadoManager : TornadoManager
+    private var weatherEventsLoadJob: Job? = null
+    private lateinit var weatherEventsManager : WeatherEventsManager
     private lateinit var sharedPref : SharedPreferences
-
+    private lateinit var polygonMangger: PolygonManager
     companion object {
         private const val PREF_COUNTIES_CHECKED = "pref_counties_checked"
         private const val PREF_STATES_CHECKED = "pref_states_checked"
         private const val PREF_COUNTRIES_CHECKED = "pref_countries_checked"
         private const val PREF_TORNADOES_CHECKED = "pref_tornadoes_checked"
+        private const val PREF_WEATHERALERT_CHECKED = "pref_weather_checked"
     }
 
     private val coroutineExceptionHandler = CoroutineExceptionHandler{ _, exception ->
@@ -101,23 +107,10 @@ class MapsActivity : AppCompatActivity(),
 
     }
 
-    private fun initializeSharedPreferences() {
-        val countiesChecked = sharedPref.getBoolean(PREF_COUNTIES_CHECKED, false)
-        val statesChecked = sharedPref.getBoolean(PREF_STATES_CHECKED, false)
-        val countriesChecked = sharedPref.getBoolean(PREF_COUNTRIES_CHECKED, false)
-        val tornadoesChecked = sharedPref.getBoolean(PREF_TORNADOES_CHECKED, false)
-
-        counties.isChecked = countiesChecked
-        states.isChecked = statesChecked
-        countries.isChecked = countriesChecked
-        tornadoes.isChecked = tornadoesChecked
-
-        initializeLayersAndMarkers()
-    }
-
     override fun onMapReady(googleMap: GoogleMap) {
         mMap = googleMap
         mMap.mapType = GoogleMap.MAP_TYPE_NORMAL
+
         //setup marker clusterer
         setUpClusterer()
 
@@ -134,12 +127,14 @@ class MapsActivity : AppCompatActivity(),
         mMap.setOnMyLocationClickListener(this)
         mMap.setOnMapClickListener(this)
         mMap.setOnCameraIdleListener(this)
+        mMap.moveCamera(CameraUpdateFactory.newLatLng(LatLng(26.0, -80.1)))
 
         //get view checkboxes
         counties = findViewById<CheckBox>(R.id.counties)
         states = findViewById<CheckBox>(R.id.states)
         countries = findViewById<CheckBox>(R.id.countries)
         tornadoes = findViewById<CheckBox>(R.id.tornadoes)
+        weatherAlerts = findViewById<CheckBox>(R.id.weatheralert)
 
         //load geoJsonLayers
         loadGeoJsonFromResource(R.raw.us_states)
@@ -148,8 +143,23 @@ class MapsActivity : AppCompatActivity(),
         //add menu listeners and checkbox listeners, and then initialize the previous state values
         removeMenuListeners()
         initializeSharedPreferences()
-        mMap.moveCamera(CameraUpdateFactory.newLatLng(LatLng(26.0, -80.1)))
 
+    }
+
+    private fun initializeSharedPreferences() {
+        val countiesChecked = sharedPref.getBoolean(PREF_COUNTIES_CHECKED, false)
+        val statesChecked = sharedPref.getBoolean(PREF_STATES_CHECKED, false)
+        val countriesChecked = sharedPref.getBoolean(PREF_COUNTRIES_CHECKED, false)
+        val tornadoesChecked = sharedPref.getBoolean(PREF_TORNADOES_CHECKED, false)
+        val weatherEventsChecked = sharedPref.getBoolean(PREF_WEATHERALERT_CHECKED, false)
+
+        counties.isChecked = countiesChecked
+        states.isChecked = statesChecked
+        countries.isChecked = countriesChecked
+        tornadoes.isChecked = tornadoesChecked
+        weatherAlerts.isChecked = weatherEventsChecked
+
+        initializeLayersAndMarkers()
     }
 
     private fun loadGeoJsonFromResource(resourceId: Int) {
@@ -200,8 +210,8 @@ class MapsActivity : AppCompatActivity(),
         mMap.setOnMarkerClickListener(clusterManager)
     }
 
-    private fun addTornadoes(tornadoManager: TornadoManager) {
-        tornadoManager.makeHTTPRequest { tornadoResponse ->
+    private fun addTornadoes() {
+        tornadoManager?.makeHTTPRequest { tornadoResponse ->
             runOnUiThread{
                 for (feature in tornadoResponse.features) {
                     val lat = feature.attributes.lat
@@ -224,26 +234,52 @@ class MapsActivity : AppCompatActivity(),
         }
     }
 
-    fun startTornadoJob(){
+    private fun addWeatherEvents(){
+        weatherEventsManager?.loadAlertPolygons { events ->
+            runOnUiThread{
+                for (event in events){
+                    mMap.addPolygon(event.value)
+                    Log.d("AddedPolygon", event.key)
+                }
+            }
+        }
+    }
+
+    private fun startTornadoJob(){
         tornadoManager = TornadoManager(System.currentTimeMillis().toInt())
         // reload tornado layers every half hour
         tornadoLoadJob = MainScope().launch{
             while(true){
                 CoroutineScope(Dispatchers.IO + coroutineExceptionHandler).launch {
                     Log.d("Tornado Coroutine", "loading tornadoes")
-                    addTornadoes(tornadoManager!!)
+                    addTornadoes()
                 }
                 delay(1000 * 60 * 30)
             }
         }
     }
-
-    fun stopTornadoJob(){
+    private fun stopTornadoJob(){
         tornadoLoadJob?.cancel()
         clusterManager.clearItems()
         clusterManager.cluster()
     }
+    private fun startWeatherAlertJob(){
+        weatherEventsManager = WeatherEventsManager()
+        weatherEventsLoadJob = MainScope().launch {
+            while(true){
+                CoroutineScope(Dispatchers.IO +coroutineExceptionHandler).launch {
+                    Log.d("Weather Events Coroutine", "loading weather events")
+                    addWeatherEvents()
+                }
+                delay(1000* 60 * 30)
+            }
+        }
+    }
 
+    private fun stopWeatherAlertsJob(){
+        weatherEventsLoadJob?.cancel()
+
+    }
     override fun onMarkerClick(marker: Marker): Boolean {
         val clickCount = marker.tag as? Int
         marker.showInfoWindow()
@@ -272,6 +308,10 @@ class MapsActivity : AppCompatActivity(),
         if (tornadoes.isChecked) {
             Log.d("Cluster", "SHOW TORNADOES")
             startTornadoJob()
+        }
+        if (weatherAlerts.isChecked){
+            Log.d("Weather", "REMOVE EVENTS")
+            startWeatherAlertJob()
         }
 
         if (countries.isChecked) {
@@ -316,6 +356,18 @@ class MapsActivity : AppCompatActivity(),
             } else {
                 Log.d("Cluster", "SHOW TORNADOES")
                 startTornadoJob()
+            }
+        }
+
+        weatherAlerts.setOnCheckedChangeListener{_, isChecked ->
+            editor.putBoolean(PREF_WEATHERALERT_CHECKED, weatherAlerts.isChecked)
+            editor.apply()
+            if (!isChecked){
+                Log.d("Weather", "REMOVE EVENTS")
+                stopWeatherAlertsJob()
+            } else {
+                Log.d("Weather", "SHOW EVENTS")
+                startWeatherAlertJob()
             }
         }
 
