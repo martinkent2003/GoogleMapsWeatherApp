@@ -11,9 +11,7 @@ import okhttp3.OkHttpClient
 import okhttp3.Request
 import java.io.IOException
 
-class TornadoManager(id: Int) {
-    private var managerId: Int
-
+class TornadoManager() {
     data class Attribute(
         @SerializedName("OBJECTID") val objectId: Int?,
         @SerializedName("UTC_DATETIME") val utcDateTime: Long?,
@@ -39,19 +37,6 @@ class TornadoManager(id: Int) {
     data class TornadoResponse(
         val features: List<Tornado>
     )
-
-    init {
-        managerId = id
-        makeHTTPRequest { tornadoResponse ->
-            Log.d("tornado data created", tornadoResponse.features.joinToString { tornado ->
-                "${tornado.attributes.objectId}. ${tornado.attributes.lat} ${tornado.attributes.long}, ${tornado.attributes.county}, ${tornado.attributes.state}, ${tornado.attributes.comments}"
-            })
-        }
-    }
-
-    fun getId(): Int {
-        return managerId
-    }
 
     fun makeHTTPRequest(callback: (TornadoResponse) -> Unit) {
         val coroutineExceptionHandler = CoroutineExceptionHandler { _, throwable ->

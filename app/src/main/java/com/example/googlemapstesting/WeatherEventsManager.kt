@@ -17,22 +17,23 @@ import kotlinx.coroutines.launch
 
 
 class WeatherEventsManager {
+
+
     private val colorMap = HashMap<String, String>()
+
+    //DATA CLASSES FOR POLYGONS
     data class WeatherEventResponse(
         @SerializedName("features") val features: List<Feature>
     )
-
     data class Feature(
         @SerializedName("attributes") val attributes: Attributes,
         @SerializedName("geometry") val geometry: Geometry?
     )
-
     data class Attributes(
         @SerializedName("OBJECTID") val objectId: String,
         @SerializedName("Event") val event: String,
         @SerializedName("Uid") val uid: String
     )
-
     data class Geometry(
         // list of polygons
         //inner list is lat and long
@@ -41,10 +42,22 @@ class WeatherEventsManager {
         @SerializedName("rings") val rings: List<List<List<Double>>>
     )
 
-    init {
+    //DATA CLASS FOR WEATHER EVENT INFO
+    data class WeatherAlertInfo(
+        @SerializedName("properties") val properties: Properties
+    )
+    data class Properties(
+        @SerializedName("headline")val headline: String,
+        @SerializedName("description")val description: String,
+        @SerializedName("severity")val severity: String,
+        @SerializedName("areaDesc")val area: String,
+        @SerializedName("event")val event: String,
+        @SerializedName("effective")val effective: String,
+        @SerializedName("expires")val expires: String
+    )
+    init{
         initColorHashMap()
     }
-
     private fun initColorHashMap() {
         colorMap["Tsunami Warning"] = "FD6347"
         colorMap["Tornado Warning"] = "FF0000"
@@ -172,10 +185,41 @@ class WeatherEventsManager {
         colorMap["Blue Alert"] = "FFFFFF"
     }
 
-    private fun makeHttpRequest(callback: (WeatherEventResponse) -> Unit){
-        val coroutineExceptionHandler = CoroutineExceptionHandler { _, throwable ->
-            Log.e("WeatherCoroutine", throwable.toString())
+    fun getWeatherAlertInfo(uid: String, callback: (WeatherAlertInfo) -> Unit){
+        val coroutineExceptionHandler: CoroutineExceptionHandler =
+            CoroutineExceptionHandler { _, throwable ->
+                Log.e("WeatherCoroutine", throwable.toString())
+            }
+
+        CoroutineScope(Dispatchers.IO + coroutineExceptionHandler).launch{
+            val request = Request.Builder()
+                .url("https://api.weather.gov/alerts/urn:oid:2.49.0.1.840.0."+uid)
+                .build()
+            try {
+                val client = OkHttpClient()
+                val response = client.newCall(request).execute()
+                if(!response.isSuccessful){
+                    Log.e("HTTP", "error")
+                }else{
+                    response.body?.let { responseBody ->
+                        val responseBodyString = responseBody.string()
+                        val gson = Gson()
+                        val weatherAlertInfo = gson.fromJson(responseBodyString, WeatherEventsManager.WeatherAlertInfo::class.java)
+                        callback(weatherAlertInfo)
+                    }
+                }
+            } catch (e: IOException) {
+                Log.e("HTTP", "IOException in HTTP Tornado Call", e)
+            }
         }
+
+    }
+
+    private fun getPolygonRequest(callback: (WeatherEventResponse) -> Unit){
+        val coroutineExceptionHandler: CoroutineExceptionHandler =
+            CoroutineExceptionHandler { _, throwable ->
+                Log.e("WeatherCoroutine", throwable.toString())
+            }
 
         CoroutineScope(Dispatchers.IO + coroutineExceptionHandler).launch {
             val request = Request.Builder()
@@ -202,7 +246,7 @@ class WeatherEventsManager {
 
     fun loadAlertPolygons(callback: (HashMap<String, PolygonOptions>) -> Unit) {
         val pOptions = HashMap<String, PolygonOptions>()
-        makeHttpRequest { response ->
+        getPolygonRequest { response ->
             for (feature in response.features) {
                 feature.geometry?.let { geometry ->
                     val polygonOpt = PolygonOptions()
@@ -247,13 +291,14 @@ class WeatherEventsManager {
                         val color = Color.parseColor("#" + (colorMap[feature.attributes.event] ?: "FFFFFF"))
 
                         // Set the desired opacity
-                        val alpha = 64
+                        val alpha = 100
                         val colorWithOpacity = (alpha shl 24) or (color and 0x00FFFFFF)
 
                         polygonOpt.fillColor(colorWithOpacity)
                         polygonOpt.strokeWidth(0.1f)
-                        pOptions[feature.attributes.objectId + ": " + feature.attributes.event] = polygonOpt
-                        Log.d("ID" + feature.attributes.objectId, "Color" + color)
+                        polygonOpt.clickable(true)
+                        pOptions[feature.attributes.uid] = polygonOpt
+                        Log.d("ID " , "UID: " +  feature.attributes.uid)
                     }
                 }
             }

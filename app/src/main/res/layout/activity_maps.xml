@@ -28,4 +28,5 @@
         android:tint="@color/white"
         android:background="@color/white"/>
     <include layout = "@layout/remove_menu"/>
+    <include layout = "@layout/weather_event_info"/>
 </FrameLayout>

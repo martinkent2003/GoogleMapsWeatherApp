@@ -11,6 +11,7 @@ import android.os.Bundle
 import android.util.Log
 import android.view.View
 import android.widget.CheckBox
+import android.widget.TextView
 import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.app.ActivityCompat
@@ -49,7 +50,6 @@ class MapsActivity : AppCompatActivity(),
     private lateinit var mMap: GoogleMap
     private lateinit var binding: ActivityMapsBinding
     private lateinit var clusterManager: ClusterManager<MyItem>
-    private val tornadoItems = mutableListOf<MyItem>()  // Keep track of all tornado items
     private lateinit var counties : CheckBox
     private lateinit var states : CheckBox
     private lateinit var countries : CheckBox
@@ -60,7 +60,8 @@ class MapsActivity : AppCompatActivity(),
     private var weatherEventsLoadJob: Job? = null
     private lateinit var weatherEventsManager : WeatherEventsManager
     private lateinit var sharedPref : SharedPreferences
-    private lateinit var polygonMangger: PolygonManager
+    private lateinit var polygonManager: PolygonManager.Collection
+
     companion object {
         private const val PREF_COUNTIES_CHECKED = "pref_counties_checked"
         private const val PREF_STATES_CHECKED = "pref_states_checked"
@@ -225,7 +226,6 @@ class MapsActivity : AppCompatActivity(),
                         val title = "$location, $county, $state"
                         val snippet = comments ?: "No additional information available."
                         val tornadoItem = MyItem(lat, long, title, snippet)
-                        tornadoItems.add(tornadoItem)
                         clusterManager.addItem(tornadoItem)
                     }
                 }
@@ -235,18 +235,24 @@ class MapsActivity : AppCompatActivity(),
     }
 
     private fun addWeatherEvents(){
-        weatherEventsManager?.loadAlertPolygons { events ->
+        weatherEventsManager.loadAlertPolygons { events ->
             runOnUiThread{
+                //used for clicking behavior
+                val PolygonInfoMap = HashMap<Polygon, String>()
                 for (event in events){
-                    mMap.addPolygon(event.value)
-                    Log.d("AddedPolygon", event.key)
+                    val polygon = polygonManager.addPolygon(event.value)
+                    polygon.tag = event.key
+                    PolygonInfoMap[polygon] = event.key
+                }
+                polygonManager.showAll()
+                polygonManager.setOnPolygonClickListener {polygon ->
+                    displayInfo(polygon.tag.toString())
                 }
             }
         }
     }
 
     private fun startTornadoJob(){
-        tornadoManager = TornadoManager(System.currentTimeMillis().toInt())
         // reload tornado layers every half hour
         tornadoLoadJob = MainScope().launch{
             while(true){
@@ -278,8 +284,10 @@ class MapsActivity : AppCompatActivity(),
 
     private fun stopWeatherAlertsJob(){
         weatherEventsLoadJob?.cancel()
-
+        polygonManager.hideAll()
+        polygonManager.clear()
     }
+
     override fun onMarkerClick(marker: Marker): Boolean {
         val clickCount = marker.tag as? Int
         marker.showInfoWindow()
@@ -305,10 +313,14 @@ class MapsActivity : AppCompatActivity(),
     }
 
     private fun initializeLayersAndMarkers() {
+
+        tornadoManager = TornadoManager()
         if (tornadoes.isChecked) {
             Log.d("Cluster", "SHOW TORNADOES")
             startTornadoJob()
         }
+
+        polygonManager = PolygonManager(mMap).newCollection()
         if (weatherAlerts.isChecked){
             Log.d("Weather", "REMOVE EVENTS")
             startWeatherAlertJob()
@@ -406,5 +418,32 @@ class MapsActivity : AppCompatActivity(),
         val ne = mapBounds.northeast
 
         Log.d("BOUNDS", "SW : $sw, NE : $ne")
+    }
+
+    //display event info in new weather_event_info box
+    private fun displayInfo(uid: String) {
+        var info: WeatherEventsManager.WeatherAlertInfo
+        weatherEventsManager.getWeatherAlertInfo(uid){info->
+            val organizedInfo =
+                """ Event: ${info.properties.event} 
+                    De
+                    Severity: ${info.properties.severity}                
+                    Area: ${info.properties.area}
+                    Effective: ${info.properties.effective}
+                    Expires: ${info.properties.expires}"""
+            val organizedInfo2 = "Event: " + info.properties.event + " \n Severity: " + info.properties.severity
+
+            Log.d("ORGANIZEDINFO", organizedInfo2)
+            findViewById<TextView>(R.id.event_info_text).text= organizedInfo
+        }
+        findViewById<View>(R.id.greyed_background_event_info).visibility= View.VISIBLE
+
+        // next two listeners are for the naming container
+        findViewById<View>(R.id.greyed_background_event_info).setOnClickListener {
+            it.visibility = View.GONE
+        }
+        findViewById<View>(R.id.event_info_container).setOnClickListener {
+            //this is purely so that clicking on it doesn't close the window
+        }
     }
 }
