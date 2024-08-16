@@ -345,69 +345,71 @@ class MapsActivity : AppCompatActivity(),
         }
     }
 
-    //remove menu listeners
+    //remove/add menu listeners
     private fun removeMenuListeners(){
         val editor = sharedPref.edit()
-        // next two listeners are for the naming container
-        findViewById<View>(R.id.removal_button).setOnClickListener{
-            findViewById<View>(R.id.greyed_background_remove).visibility= View.VISIBLE
-        }
-        findViewById<View>(R.id.greyed_background_remove).setOnClickListener{
-            it.visibility = View.GONE
-        }
-        findViewById<View>(R.id.remove_container).setOnClickListener{
+        runOnUiThread{
+            // next two listeners are for the naming container
+            findViewById<View>(R.id.removal_button).setOnClickListener{
+                findViewById<View>(R.id.greyed_background_remove).visibility= View.VISIBLE
+            }
+            findViewById<View>(R.id.greyed_background_remove).setOnClickListener{
+                it.visibility = View.GONE
+            }
+            findViewById<View>(R.id.remove_container).setOnClickListener{
                 //this is purely so that clicking on it doesn't close the window
-        }
-
-        tornadoes.setOnCheckedChangeListener{_, isChecked ->
-            editor.putBoolean(PREF_TORNADOES_CHECKED, tornadoes.isChecked)
-            editor.apply()
-            if (!isChecked) {
-                Log.d("Cluster", "DELETE TORNADOES")
-                stopTornadoJob()
-            } else {
-                Log.d("Cluster", "SHOW TORNADOES")
-                startTornadoJob()
             }
-        }
 
-        weatherAlerts.setOnCheckedChangeListener{_, isChecked ->
-            editor.putBoolean(PREF_WEATHERALERT_CHECKED, weatherAlerts.isChecked)
-            editor.apply()
-            if (!isChecked){
-                Log.d("Weather", "REMOVE EVENTS")
-                stopWeatherAlertsJob()
-            } else {
-                Log.d("Weather", "SHOW EVENTS")
-                startWeatherAlertJob()
+            tornadoes.setOnCheckedChangeListener{_, isChecked ->
+                editor.putBoolean(PREF_TORNADOES_CHECKED, tornadoes.isChecked)
+                editor.apply()
+                if (!isChecked) {
+                    Log.d("Cluster", "DELETE TORNADOES")
+                    stopTornadoJob()
+                } else {
+                    Log.d("Cluster", "SHOW TORNADOES")
+                    startTornadoJob()
+                }
             }
-        }
 
-        countries.setOnCheckedChangeListener{_, isChecked ->
-            editor.putBoolean(PREF_COUNTRIES_CHECKED, countries.isChecked)
-            editor.apply()
-            if (!isChecked)
-                layers[R.raw.countries]?.removeLayerFromMap()
-            else
-                layers[R.raw.countries]?.addLayerToMap()
-        }
+            weatherAlerts.setOnCheckedChangeListener{_, isChecked ->
+                editor.putBoolean(PREF_WEATHERALERT_CHECKED, weatherAlerts.isChecked)
+                editor.apply()
+                if (!isChecked){
+                    Log.d("Weather", "REMOVE EVENTS")
+                    stopWeatherAlertsJob()
+                } else {
+                    Log.d("Weather", "SHOW EVENTS")
+                    startWeatherAlertJob()
+                }
+            }
 
-        states.setOnCheckedChangeListener{_, isChecked ->
-            editor.putBoolean(PREF_STATES_CHECKED, states.isChecked)
-            editor.apply()
-            if (!isChecked)
-                layers[R.raw.us_states]?.removeLayerFromMap()
-            else
-                layers[R.raw.us_states]?.addLayerToMap()
-        }
+            countries.setOnCheckedChangeListener{_, isChecked ->
+                editor.putBoolean(PREF_COUNTRIES_CHECKED, countries.isChecked)
+                editor.apply()
+                if (!isChecked)
+                    layers[R.raw.countries]?.removeLayerFromMap()
+                else
+                    layers[R.raw.countries]?.addLayerToMap()
+            }
 
-        counties.setOnCheckedChangeListener{_, isChecked ->
-            editor.putBoolean(PREF_COUNTIES_CHECKED, counties.isChecked)
-            editor.apply()
-            if (!isChecked)
-                layers[R.raw.us_counties]?.removeLayerFromMap()
-            else
-                layers[R.raw.us_counties]?.addLayerToMap()
+            states.setOnCheckedChangeListener{_, isChecked ->
+                editor.putBoolean(PREF_STATES_CHECKED, states.isChecked)
+                editor.apply()
+                if (!isChecked)
+                    layers[R.raw.us_states]?.removeLayerFromMap()
+                else
+                    layers[R.raw.us_states]?.addLayerToMap()
+            }
+
+            counties.setOnCheckedChangeListener{_, isChecked ->
+                editor.putBoolean(PREF_COUNTIES_CHECKED, counties.isChecked)
+                editor.apply()
+                if (!isChecked)
+                    layers[R.raw.us_counties]?.removeLayerFromMap()
+                else
+                    layers[R.raw.us_counties]?.addLayerToMap()
+            }
         }
     }
 
@@ -426,7 +428,6 @@ class MapsActivity : AppCompatActivity(),
         weatherEventsManager.getWeatherAlertInfo(uid){info->
             val organizedInfo =
                 """ Event: ${info.properties.event} 
-                    De
                     Severity: ${info.properties.severity}                
                     Area: ${info.properties.area}
                     Effective: ${info.properties.effective}
